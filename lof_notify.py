@@ -261,8 +261,8 @@ def build_wechat_message(rows, now_str):
     if arb:
         lines.append(f"### ⚡ 套利机会（{len(arb)}只）")
         lines.append("")
-        lines.append("| 基金 | 溢价 | 限额 | 状态 |")
-        lines.append("|------|------|------|------|")
+        # lines.append("| 基金 | 溢价 | 限额 | 状态 |")
+        # lines.append("|------|------|------|------|")
         for r in arb:
             lines.append(
                 f"| {r['name']} `{r['full_code']}` "
@@ -295,9 +295,9 @@ def build_wechat_message(rows, now_str):
     #     prem_str = f"+{prem:.2f}%" if prem and prem > 0 else (f"{prem:.2f}%" if prem else "—")
     #     lines.append(f"| {i} | {r['name']} | {prem_str} | {fmt_money(r['quota'])} |")
 
-    lines.append("")
-    lines.append(f"---")
-    lines.append(f"*数据来源：palmmicro + 天天基金 · {now_str}*")
+    # lines.append("")
+    # lines.append(f"---")
+    # lines.append(f"*数据来源：palmmicro + 天天基金 · {now_str}*")
 
     return title, "\n".join(lines)
 
@@ -319,7 +319,47 @@ def send_wechat(title, content, sendkey):
     except Exception as e:
         print(f"❌ 推送异常: {e}")
 
-# ─── 历史记录 CSV ─────────────────────────────────────────────────────────────
+def generate_orders(rows, premium_threshold=0.5, order_type=">"):
+    """
+    生成LOF申购订单字符串
+    
+    参数：
+        rows: 基金数据列表（包含code6, quota, premium, status等字段）
+        premium_threshold: 溢价率阈值（%），超过此值的基金将被列入订单
+        order_type: 订单类型，">" 拖拉机申购，"$" 单账户申购
+    
+    返回：
+        订单内容字符串，每行格式为 ">基金代码:申购限额"
+    """
+    # 过滤出有套利价值且可申购的基金
+    eligible = [
+        r for r in rows 
+        if (r["premium"] or 0) > premium_threshold 
+        and r["status"] in ("open", "limited")
+    ]
+    
+    lines = []
+    
+    if not eligible:
+        lines.append("# 暂无符合条件的套利机会")
+    else:
+        # 按溢价率降序排序
+        eligible.sort(key=lambda x: x["premium"], reverse=True)
+        for r in eligible:
+            # 确定申购限额（如果有大额限购，使用限购额度；否则使用默认值）
+            quota = r["quota"]
+            if quota:
+                # 将限额转换为整数金额（单位：元）
+                order_amount = int(quota) if quota < 1e4 else int(quota / 1e4) * 10000
+            else:
+                order_amount = 1000  # 默认1万元
+
+            if order_amount > 10000:
+                order_amount = 10000
+            lines.append("# %s - 溢价率: +%.2f%%" % (r["name"], r["premium"]))
+            lines.append("%s%s:%d" % (order_type, r["code6"], order_amount))
+    
+    return "\n".join(lines)
 
 def save_history_csv(rows, now_str, filepath="history.csv"):
     """追加一行到历史CSV"""
@@ -334,6 +374,28 @@ def save_history_csv(rows, now_str, filepath="history.csv"):
             row[r["full_code"]] = r["premium"] if r["premium"] is not None else ""
         writer.writerow(row)
     print(f"历史记录已追加到 {filepath}")
+
+WEBHOOK_URL = "https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=d68e5beb-9b8f-4d76-8006-8f58dd50c6b2"
+def send_notification(msg):
+    print("[开始发送企业微信推送]...\n%s" % msg)
+    
+    # 企业微信机器人支持 Markdown 格式
+    payload = {
+        "msgtype": "markdown",
+        "markdown": {
+            "content": msg
+        }
+    }
+    
+    try:
+        # 直接 POST 到 Webhook 地址，发送 JSON 数据
+        res = requests.post(WEBHOOK_URL, json=payload, timeout=10).json()
+        if res.get("errcode") == 0:
+            print("推送成功")
+        else:
+            print("返回错误: %s" % res)
+    except Exception as e:
+        print("推送失败，网络异常: %s" % e)
 
 # ─── 主程序 ──────────────────────────────────────────────────────────────────
 
@@ -357,10 +419,16 @@ def main():
     # 保存历史 CSV
     save_history_csv(rows, now_str)
 
+    send_wechat(generate_orders(rows, premium_threshold=0.5, order_type=">"))
+
     # 构建并发送微信消息
     title, content = build_wechat_message(rows, now_str)
     print(f"\n--- 推送内容预览 ---\n{title}\n")
 
+    print(content)
+    
+    send_notification(content)
+    
     if sendkey:
         send_wechat(title, content, sendkey)
 
