@@ -356,8 +356,12 @@ def generate_orders(rows, premium_threshold=0.5, order_type=">"):
 
             if order_amount > 10000:
                 order_amount = 10000
-            lines.append("# %s - 溢价率: +%.2f%%" % (r["name"], r["premium"]))
-            lines.append("%s%s:%d" % (order_type, r["code6"], order_amount))
+            # 转义 Markdown 特殊字符，确保 > 和 # 显示为普通字符
+            comment_line = "# %s - 溢价率: +%.2f%%" % (r["name"], r["premium"])
+            order_line = "%s%s:%d" % (order_type, r["code6"], order_amount)
+            # 转义 > 和 #
+            lines.append(comment_line.replace("#", "\\#"))
+            lines.append(order_line.replace(">", "\\>"))
     
     return "\n".join(lines)
 
