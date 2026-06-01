@@ -419,7 +419,7 @@ def main():
     # 保存历史 CSV
     save_history_csv(rows, now_str)
 
-    send_wechat(generate_orders(rows, premium_threshold=0.5, order_type=">"))
+    send_notification(generate_orders(rows, premium_threshold=0.5, order_type=">"))
 
     # 构建并发送微信消息
     title, content = build_wechat_message(rows, now_str)
